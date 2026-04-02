@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sudoku</title>
+
+  <!-- Tesseract.js for camera OCR (reads digits from photos) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+  <style>
+    /* ===== BASE STYLES ===== */
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: #f0f4f8;
+      color: #333;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 16px;
+      color: #2c3e50;
+    }
+
+    /* ===== TOOLBAR (buttons above the board) ===== */
+
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .toolbar button {
+      padding: 10px 20px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      background: #3498db;
+      color: #fff;
+      transition: background 0.2s;
+    }
+
+    .toolbar button:hover {
+      background: #2980b9;
+    }
+
+    .toolbar button.danger {
+      background: #e74c3c;
+    }
+
+    .toolbar button.danger:hover {
+      background: #c0392b;
+    }
+
+    /* ===== SUDOKU BOARD ===== */
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(9, 1fr);
+      gap: 0;
+      border: 3px solid #2c3e50;
+      width: min(90vw, 450px);
+      height: min(90vw, 450px);
+      background: #2c3e50;
+    }
+
+    .cell {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #fff;
+      font-size: 1.4rem;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s;
+
+      /* Thin inner borders */
+      border-right: 1px solid #bdc3c7;
+      border-bottom: 1px solid #bdc3c7;
+    }
+
+    /* Thick borders to separate 3x3 boxes */
+    .cell:nth-child(3n) {
+      border-right: 3px solid #2c3e50;
+    }
+
+    .cell:nth-child(n+19):nth-child(-n+27),
+    .cell:nth-child(n+46):nth-child(-n+54) {
+      border-bottom: 3px solid #2c3e50;
+    }
+
+    /* Remove outer-right and outer-bottom (the board border handles it) */
+    .cell:nth-child(9n) {
+      border-right: none;
+    }
+
+    .cell:nth-child(n+73) {
+      border-bottom: none;
+    }
+
+    /* Cell states */
+    .cell.selected {
+      background: #d4e6f1;
+    }
+
+    .cell.highlighted {
+      background: #eaf2f8;
+    }
+
+    .cell.given {
+      font-weight: bold;
+      color: #2c3e50;
+    }
+
+    .cell.user-entered {
+      color: #2980b9;
+    }
+
+    .cell.error {
+      background: #fadbd8;
+      color: #e74c3c;
+    }
+
+    /* ===== NUMBER PAD ===== */
+
+    .numpad {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .numpad button {
+      width: 48px;
+      height: 48px;
+      font-size: 1.3rem;
+      border: 2px solid #3498db;
+      border-radius: 8px;
+      background: #fff;
+      color: #3498db;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .numpad button:hover {
+      background: #3498db;
+      color: #fff;
+    }
+
+    .numpad button.erase {
+      width: auto;
+      padding: 0 16px;
+      font-size: 1rem;
+      border-color: #e74c3c;
+      color: #e74c3c;
+    }
+
+    .numpad button.erase:hover {
+      background: #e74c3c;
+      color: #fff;
+    }
+
+    /* ===== STATUS MESSAGE ===== */
+
+    .status {
+      margin-top: 16px;
+      font-size: 1.1rem;
+      min-height: 1.5em;
+      text-align: center;
+    }
+
+    .status.success {
+      color: #27ae60;
+      font-weight: bold;
+    }
+
+    .status.error-msg {
+      color: #e74c3c;
+    }
+
+    /* ===== CAMERA MODAL ===== */
+
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-overlay.visible {
+      display: flex;
+    }
+
+    .modal {
+      background: #fff;
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 500px;
+      width: 90vw;
+      text-align: center;
+    }
+
+    .modal h2 {
+      margin-bottom: 16px;
+      color: #2c3e50;
+    }
+
+    .modal video,
+    .modal canvas {
+      width: 100%;
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+
+    .modal .modal-buttons {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .modal button {
+      padding: 10px 20px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      color: #fff;
+    }
+
+    .modal .btn-capture {
+      background: #27ae60;
+    }
+
+    .modal .btn-capture:hover {
+      background: #219a52;
+    }
+
+    .modal .btn-cancel {
+      background: #95a5a6;
+    }
+
+    .modal .btn-cancel:hover {
+      background: #7f8c8d;
+    }
+
+    .modal .progress-text {
+      margin-top: 12px;
+      font-size: 0.95rem;
+      color: #7f8c8d;
+    }
+
+    /* ===== RESPONSIVE ===== */
+
+    @media (max-width: 480px) {
+      h1 { font-size: 1.5rem; }
+      .cell { font-size: 1.1rem; }
+      .numpad button { width: 40px; height: 40px; font-size: 1.1rem; }
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>Sudoku</h1>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <button onclick="loadPresetPuzzle()">New Game</button>
+    <button onclick="openCamera()">Scan from Camera</button>
+    <button onclick="checkSolution()">Check</button>
+    <button class="danger" onclick="resetBoard()">Reset</button>
+  </div>
+
+  <!-- The 9x9 Sudoku Board -->
+  <div class="board" id="board"></div>
+
+  <!-- Number Pad -->
+  <div class="numpad">
+    <button onclick="enterNumber(1)">1</button>
+    <button onclick="enterNumber(2)">2</button>
+    <button onclick="enterNumber(3)">3</button>
+    <button onclick="enterNumber(4)">4</button>
+    <button onclick="enterNumber(5)">5</button>
+    <button onclick="enterNumber(6)">6</button>
+    <button onclick="enterNumber(7)">7</button>
+    <button onclick="enterNumber(8)">8</button>
+    <button onclick="enterNumber(9)">9</button>
+    <button class="erase" onclick="enterNumber(0)">Erase</button>
+  </div>
+
+  <!-- Status message (shows errors, success, etc.) -->
+  <div class="status" id="status"></div>
+
+  <!-- Camera Modal -->
+  <div class="modal-overlay" id="cameraModal">
+    <div class="modal">
+      <h2>Scan Sudoku Puzzle</h2>
+
+      <!-- Live camera feed -->
+      <video id="cameraFeed" autoplay playsinline></video>
+
+      <!-- Hidden canvas used to capture a snapshot -->
+      <canvas id="snapshot" style="display:none;"></canvas>
+
+      <div class="modal-buttons">
+        <button class="btn-capture" id="captureBtn" onclick="capturePhoto()">Capture</button>
+        <button class="btn-cancel" onclick="closeCamera()">Cancel</button>
+      </div>
+
+      <div class="progress-text" id="ocrProgress"></div>
+    </div>
+  </div>
+
+  <script>
+    // =============================================================
+    //  GAME STATE
+    // =============================================================
+
+    // The puzzle is stored as a flat array of 81 numbers (0 = empty).
+    // "given" cells are the clues that the player cannot change.
+
+    let puzzle = new Array(81).fill(0);   // current numbers on the board
+    let given  = new Array(81).fill(false); // true = clue cell (locked)
+    let selectedCell = -1;                  // index of the currently selected cell
+
+    // =============================================================
+    //  PRELOADED PUZZLES
+    // =============================================================
+
+    // A few sample puzzles. 0 means empty.
+    const SAMPLE_PUZZLES = [
+      [
+        5,3,0, 0,7,0, 0,0,0,
+        6,0,0, 1,9,5, 0,0,0,
+        0,9,8, 0,0,0, 0,6,0,
+
+        8,0,0, 0,6,0, 0,0,3,
+        4,0,0, 8,0,3, 0,0,1,
+        7,0,0, 0,2,0, 0,0,6,
+
+        0,6,0, 0,0,0, 2,8,0,
+        0,0,0, 4,1,9, 0,0,5,
+        0,0,0, 0,8,0, 0,7,9
+      ],
+      [
+        0,0,0, 2,6,0, 7,0,1,
+        6,8,0, 0,7,0, 0,9,0,
+        1,9,0, 0,0,4, 5,0,0,
+
+        8,2,0, 1,0,0, 0,4,0,
+        0,0,4, 6,0,2, 9,0,0,
+        0,5,0, 0,0,3, 0,2,8,
+
+        0,0,9, 3,0,0, 0,7,4,
+        0,4,0, 0,5,0, 0,3,6,
+        7,0,3, 0,1,8, 0,0,0
+      ],
+      [
+        0,0,0, 6,0,0, 4,0,0,
+        7,0,0, 0,0,3, 6,0,0,
+        0,0,0, 0,9,1, 0,8,0,
+
+        0,0,0, 0,0,0, 0,0,0,
+        0,5,0, 1,8,0, 0,0,3,
+        0,0,0, 3,0,6, 0,4,5,
+
+        0,4,0, 2,0,0, 0,6,0,
+        9,0,3, 0,0,0, 0,0,0,
+        0,2,0, 0,0,0, 1,0,0
+      ]
+    ];
+
+    // =============================================================
+    //  BUILD THE BOARD (runs once on page load)
+    // =============================================================
+
+    function buildBoard() {
+      const boardEl = document.getElementById("board");
+      boardEl.innerHTML = "";
+
+      for (let i = 0; i < 81; i++) {
+        const cell = document.createElement("div");
+        cell.className = "cell";
+        cell.dataset.index = i;
+
+        // When a cell is clicked, select it
+        cell.addEventListener("click", () => selectCell(i));
+
+        boardEl.appendChild(cell);
+      }
+    }
+
+    // =============================================================
+    //  RENDER — updates the visual board from the puzzle array
+    // =============================================================
+
+    function render() {
+      const cells = document.querySelectorAll(".cell");
+
+      cells.forEach((cell, i) => {
+        // Show the number (or blank if 0)
+        cell.textContent = puzzle[i] !== 0 ? puzzle[i] : "";
+
+        // Reset classes
+        cell.className = "cell";
+
+        // Mark given (clue) cells
+        if (given[i]) {
+          cell.classList.add("given");
+        } else if (puzzle[i] !== 0) {
+          cell.classList.add("user-entered");
+        }
+
+        // Highlight the selected cell
+        if (i === selectedCell) {
+          cell.classList.add("selected");
+        }
+
+        // Highlight cells in the same row, column, or 3x3 box
+        if (selectedCell >= 0 && i !== selectedCell) {
+          if (sameGroup(i, selectedCell)) {
+            cell.classList.add("highlighted");
+          }
+        }
+      });
+    }
+
+    // Check if two cell indices are in the same row, column, or 3x3 box
+    function sameGroup(a, b) {
+      const rowA = Math.floor(a / 9), colA = a % 9;
+      const rowB = Math.floor(b / 9), colB = b % 9;
+
+      if (rowA === rowB) return true;                           // same row
+      if (colA === colB) return true;                           // same column
+      if (Math.floor(rowA / 3) === Math.floor(rowB / 3) &&     // same box
+          Math.floor(colA / 3) === Math.floor(colB / 3)) return true;
+
+      return false;
+    }
+
+    // =============================================================
+    //  CELL SELECTION & NUMBER ENTRY
+    // =============================================================
+
+    function selectCell(index) {
+      selectedCell = index;
+      clearStatus();
+      render();
+    }
+
+    function enterNumber(num) {
+      if (selectedCell < 0) return;        // no cell selected
+      if (given[selectedCell]) return;     // can't change a clue cell
+
+      puzzle[selectedCell] = num;          // 0 = erase
+      clearStatus();
+      render();
+    }
+
+    // Keyboard support: arrow keys to move, 1-9 to enter, Backspace/Delete to erase
+    document.addEventListener("keydown", (e) => {
+      if (selectedCell < 0) return;
+
+      const row = Math.floor(selectedCell / 9);
+      const col = selectedCell % 9;
+
+      switch (e.key) {
+        case "ArrowUp":    if (row > 0) selectCell(selectedCell - 9); break;
+        case "ArrowDown":  if (row < 8) selectCell(selectedCell + 9); break;
+        case "ArrowLeft":  if (col > 0) selectCell(selectedCell - 1); break;
+        case "ArrowRight": if (col < 8) selectCell(selectedCell + 1); break;
+        case "Backspace":
+        case "Delete":     enterNumber(0); break;
+        default:
+          if (e.key >= "1" && e.key <= "9") {
+            enterNumber(parseInt(e.key));
+          }
+      }
+    });
+
+    // =============================================================
+    //  LOAD A PUZZLE
+    // =============================================================
+
+    function loadPuzzle(numbers) {
+      for (let i = 0; i < 81; i++) {
+        puzzle[i] = numbers[i] || 0;
+        given[i]  = numbers[i] !== 0;  // non-zero cells are clues
+      }
+      selectedCell = -1;
+      clearStatus();
+      render();
+    }
+
+    function loadPresetPuzzle() {
+      // Pick a random sample puzzle
+      const randomIndex = Math.floor(Math.random() * SAMPLE_PUZZLES.length);
+      loadPuzzle(SAMPLE_PUZZLES[randomIndex]);
+      setStatus("New puzzle loaded. Good luck!");
+    }
+
+    function resetBoard() {
+      // Keep the given clues, erase only user-entered numbers
+      for (let i = 0; i < 81; i++) {
+        if (!given[i]) {
+          puzzle[i] = 0;
+        }
+      }
+      selectedCell = -1;
+      clearStatus();
+      render();
+    }
+
+    // =============================================================
+    //  VALIDATION / CHECK
+    // =============================================================
+
+    function checkSolution() {
+      // First check if the board is fully filled
+      if (puzzle.includes(0)) {
+        setStatus("The board isn't complete yet.", "error-msg");
+        highlightErrors();
+        return;
+      }
+
+      // Check all rows, columns, and boxes
+      const hasErrors = highlightErrors();
+
+      if (!hasErrors) {
+        setStatus("Congratulations! You solved it!", "success");
+      } else {
+        setStatus("Some numbers conflict. Keep trying!", "error-msg");
+      }
+    }
+
+    // Highlight any cells that conflict with another cell in the same group.
+    // Returns true if there are any errors.
+    function highlightErrors() {
+      const errorCells = new Set();
+
+      // Check each row
+      for (let row = 0; row < 9; row++) {
+        findDuplicates(row * 9, 1, 9, errorCells);
+      }
+
+      // Check each column
+      for (let col = 0; col < 9; col++) {
+        findDuplicates(col, 9, 9, errorCells);
+      }
+
+      // Check each 3x3 box
+      for (let boxRow = 0; boxRow < 3; boxRow++) {
+        for (let boxCol = 0; boxCol < 3; boxCol++) {
+          const start = boxRow * 27 + boxCol * 3;
+          const indices = [];
+          for (let r = 0; r < 3; r++) {
+            for (let c = 0; c < 3; c++) {
+              indices.push(start + r * 9 + c);
+            }
+          }
+          findDuplicatesInList(indices, errorCells);
+        }
+      }
+
+      // Apply error styling
+      const cells = document.querySelectorAll(".cell");
+      errorCells.forEach((i) => cells[i].classList.add("error"));
+
+      return errorCells.size > 0;
+    }
+
+    // Find duplicates in a linear sequence of cells
+    function findDuplicates(startIndex, step, count, errorSet) {
+      const indices = [];
+      for (let i = 0; i < count; i++) {
+        indices.push(startIndex + i * step);
+      }
+      findDuplicatesInList(indices, errorSet);
+    }
+
+    // Find duplicates among a list of cell indices
+    function findDuplicatesInList(indices, errorSet) {
+      const seen = {};
+      for (const i of indices) {
+        const val = puzzle[i];
+        if (val === 0) continue;
+        if (seen[val] !== undefined) {
+          errorSet.add(i);
+          errorSet.add(seen[val]);
+        } else {
+          seen[val] = i;
+        }
+      }
+    }
+
+    // =============================================================
+    //  STATUS MESSAGE HELPERS
+    // =============================================================
+
+    function setStatus(msg, className) {
+      const el = document.getElementById("status");
+      el.textContent = msg;
+      el.className = "status " + (className || "");
+    }
+
+    function clearStatus() {
+      setStatus("");
+    }
+
+    // =============================================================
+    //  CAMERA SCANNING (uses Tesseract.js for OCR)
+    // =============================================================
+
+    let cameraStream = null;
+
+    async function openCamera() {
+      const modal = document.getElementById("cameraModal");
+      const video = document.getElementById("cameraFeed");
+      const progress = document.getElementById("ocrProgress");
+
+      progress.textContent = "";
+      modal.classList.add("visible");
+
+      try {
+        // Request camera access (prefer back camera on phones)
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" }
+        });
+        video.srcObject = cameraStream;
+      } catch (err) {
+        progress.textContent = "Could not access camera: " + err.message;
+      }
+    }
+
+    function closeCamera() {
+      // Stop the camera stream
+      if (cameraStream) {
+        cameraStream.getTracks().forEach((track) => track.stop());
+        cameraStream = null;
+      }
+
+      const modal = document.getElementById("cameraModal");
+      const video = document.getElementById("cameraFeed");
+      video.srcObject = null;
+      modal.classList.remove("visible");
+    }
+
+    async function capturePhoto() {
+      const video = document.getElementById("cameraFeed");
+      const canvas = document.getElementById("snapshot");
+      const progress = document.getElementById("ocrProgress");
+      const captureBtn = document.getElementById("captureBtn");
+
+      // Draw the current video frame onto the canvas
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0);
+
+      // Show the snapshot instead of the live feed
+      canvas.style.display = "block";
+      video.style.display = "none";
+      captureBtn.disabled = true;
+
+      progress.textContent = "Recognizing digits... this may take a moment.";
+
+      try {
+        // Run OCR on the captured image
+        const result = await Tesseract.recognize(canvas, "eng", {
+          logger: (info) => {
+            if (info.status === "recognizing text") {
+              const pct = Math.round(info.progress * 100);
+              progress.textContent = `Recognizing... ${pct}%`;
+            }
+          }
+        });
+
+        // Parse the recognized text into a Sudoku grid
+        const numbers = parseOCRText(result.data.text);
+
+        if (numbers) {
+          loadPuzzle(numbers);
+          setStatus("Puzzle loaded from camera! Review and correct any misread cells.");
+          closeCamera();
+        } else {
+          progress.textContent =
+            "Could not detect a full 9x9 grid. Try again with better lighting and framing.";
+        }
+      } catch (err) {
+        progress.textContent = "OCR failed: " + err.message;
+      }
+
+      // Restore the camera feed view
+      canvas.style.display = "none";
+      video.style.display = "block";
+      captureBtn.disabled = false;
+    }
+
+    // Parse OCR text output into an array of 81 numbers.
+    // Expects roughly 9 lines, each with 9 digits (or dots/spaces for empties).
+    function parseOCRText(text) {
+      // Clean up: keep only digits, dots, spaces, and newlines
+      const lines = text
+        .split("\n")
+        .map((line) => line.replace(/[^0-9._ |]/g, ""))  // keep digits and common placeholders
+        .map((line) => line.replace(/[._|]/g, "0"))        // treat placeholders as 0
+        .map((line) => line.replace(/\s+/g, ""))           // remove spaces
+        .filter((line) => line.length >= 5);               // keep lines with enough content
+
+      if (lines.length < 9) return null;
+
+      const numbers = [];
+
+      // Take exactly 9 lines
+      for (let i = 0; i < 9 && i < lines.length; i++) {
+        const digits = lines[i].split("").map(Number);
+
+        // Pad or trim to exactly 9 digits
+        while (digits.length < 9) digits.push(0);
+        numbers.push(...digits.slice(0, 9));
+      }
+
+      if (numbers.length !== 81) return null;
+
+      // Sanity check: all values should be 0-9
+      if (numbers.some((n) => isNaN(n) || n < 0 || n > 9)) return null;
+
+      return numbers;
+    }
+
+    // =============================================================
+    //  INITIALIZE
+    // =============================================================
+
+    buildBoard();
+    loadPresetPuzzle();
+  </script>
+
+</body>
+</html>
